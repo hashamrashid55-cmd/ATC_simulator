@@ -1,0 +1,486 @@
+// === File: DataStructures.h ===
+#ifndef DATASTRUCTURES_H
+#define DATASTRUCTURES_H
+
+#include <iostream>
+#include <string>
+#include <fstream>
+#include <climits> // For INT_MAX
+
+using namespace std;
+
+// ==========================================
+// CENTRAL DATA OBJECT: THE AIRCRAFT
+// ==========================================
+struct Plane {
+    string id;          // e.g., "PK-786"
+    string model;       // e.g., "A320"
+    int fuel;           // percentage
+    int priority;       // 1=critical ... 4=low
+    string status;      // "In Air", "Landed", etc.
+    int x, y;           // grid position
+    int nodeId;         // which graph node it's near
+
+    Plane() : id(""), model(""), fuel(0), priority(4), status("In Air"), x(0), y(0), nodeId(0) {}
+    Plane(const string& i, const string& m, int f, int p, int _x, int _y, int n)
+        : id(i), model(m), fuel(f), priority(p), status("In Air"), x(_x), y(_y), nodeId(n) {}
+};
+
+// ==========================================
+// SIMPLE HASH TABLE (CHAINS)
+// ==========================================
+struct HashNode {
+    Plane data;
+    HashNode* next;
+    HashNode(const Plane& p) : data(p), next(nullptr) {}
+};
+
+class HashTable {
+    static const int SLOTS = 23;
+    HashNode* table[SLOTS];
+
+    int hashFn(const string& k) const {
+        unsigned int s = 0;
+        for (unsigned char c : k) s = s * 31 + c;
+        return s % SLOTS;
+    }
+
+public:
+    HashTable() { for (int i = 0; i < SLOTS; ++i) table[i] = nullptr; }
+
+    void insert(const Plane& p) {
+        int idx = hashFn(p.id);
+        HashNode* n = new HashNode(p);
+        n->next = table[idx];
+        table[idx] = n;
+    }
+
+    Plane* search(const string& id) {
+        int idx = hashFn(id);
+        HashNode* cur = table[idx];
+        while (cur) {
+            if (cur->data.id == id) return &cur->data;
+            cur = cur->next;
+        }
+        return nullptr;
+    }
+
+    void collectAll(Plane* arr[], int& cnt) {
+        cnt = 0;
+        for (int i = 0; i < SLOTS; ++i) {
+            HashNode* cur = table[i];
+            while (cur) {
+                arr[cnt++] = &cur->data;
+                cur = cur->next;
+            }
+        }
+    }
+
+    void dumpToFile(ofstream& out) {
+        for (int i = 0; i < SLOTS; ++i) {
+            HashNode* cur = table[i];
+            while (cur) {
+                out << cur->data.id << ' ' << cur->data.model << ' ' << cur->data.fuel << ' '
+                    << cur->data.priority << ' ' << cur->data.x << ' ' << cur->data.y << '
+';
+                cur = cur->next;
+            }
+        }
+    }
+};
+
+// ==========================================
+// MIN-HEAP (BY PRIORITY)
+// ==========================================
+class MinHeap {
+    Plane* heap[200];
+    int size;
+
+    int parent(int i) const { return (i - 1) / 2; }
+    int left(int i) const { return 2 * i + 1; }
+    int right(int i) const { return 2 * i + 2; }
+
+    void siftDown(int i) {
+        int l = left(i), r = right(i), smallest = i;
+        if (l < size && heap[l]->priority < heap[smallest]->priority) smallest = l;
+        if (r < size && heap[r]->priority < heap[smallest]->priority) smallest = r;
+        if (smallest != i) { swap(heap[i], heap[smallest]); siftDown(smallest); }
+    }
+
+public:
+    MinHeap() : size(0) {}
+
+    void insert(Plane* p) {
+        if (size >= 200) return;
+        int idx = size++;
+        heap[idx] = p;
+        while (idx > 0 && heap[parent(idx)]->priority > heap[idx]->priority) {
+            swap(heap[idx], heap[parent(idx)]);
+            idx = parent(idx);
+        }
+    }
+
+    Plane* extractMin() {
+        if (size <= 0) return nullptr;
+        if (size == 1) { size = 0; return heap[0]; }
+        Plane* top = heap[0];
+        heap[0] = heap[--size];
+        siftDown(0);
+        return top;
+    }
+
+    void decreaseKey(const string& id, int newPriority) {
+        for (int i = 0; i < size; ++i) {
+            if (heap[i]->id == id) {
+                heap[i]->priority = newPriority;
+                int idx = i;
+                while (idx > 0 && heap[parent(idx)]->priority > heap[idx]->priority) {
+                    swap(heap[idx], heap[parent(idx)]);
+                    idx = parent(idx);
+                }
+                return;
+            }
+        }
+    }
+
+    Plane* peek() const { return (size > 0) ? heap[0] : nullptr; }
+    bool empty() const { return size == 0; }
+};
+
+// ==========================================
+// SIMPLE AVL (USED FOR LOG DISPLAY)
+// ==========================================
+struct AVLNode {
+    string text;
+    int height;
+    AVLNode* l;
+    AVLNode* r;
+    AVLNode(const string& t) : text(t), height(1), l(nullptr), r(nullptr) {}
+};
+
+class AVLTree {
+    AVLNode* root;
+
+    int h(AVLNode* n) const { return n ? n->height : 0; }
+    int bal(AVLNode* n) const { return n ? h(n->l) - h(n->r) : 0; }
+    int mx(int a, int b) const { return (a > b) ? a : b; }
+
+    AVLNode* rotR(AVLNode* y) {
+        AVLNode* x = y->l;
+        AVLNode* T2 = x->r;
+        x->r = y;
+        y->l = T2;
+        y->height = 1 + mx(h(y->l), h(y->r));
+        x->height = 1 + mx(h(x->l), h(x->r));
+        return x;
+    }
+
+    AVLNode* rotL(AVLNode* x) {
+        AVLNode* y = x->r;
+        AVLNode* T2 = y->l;
+        y->l = x;
+        x->r = T2;
+        x->height = 1 + mx(h(x->l), h(x->r));
+        y->height = 1 + mx(h(y->l), h(y->r));
+        return y;
+    }
+
+    AVLNode* insertNode(AVLNode* node, const string& s) {
+        if (!node) return new AVLNode(s);
+        if (s < node->text) node->l = insertNode(node->l, s);
+        else if (s > node->text) node->r = insertNode(node->r, s);
+        else return node;
+        node->height = 1 + mx(h(node->l), h(node->r));
+        int b = bal(node);
+        if (b > 1 && s < node->l->text) return rotR(node);
+        if (b < -1 && s > node->r->text) return rotL(node);
+        if (b > 1 && s > node->l->text) { node->l = rotL(node->l); return rotR(node); }
+        if (b < -1 && s < node->r->text) { node->r = rotR(node->r); return rotL(node); }
+        return node;
+    }
+
+    void inorder(AVLNode* n, ofstream* f = nullptr) const {
+        if (!n) return;
+        inorder(n->l, f);
+        cout << n->text << endl;
+        if (f) *f << n->text << endl;
+        inorder(n->r, f);
+    }
+
+public:
+    AVLTree() : root(nullptr) {}
+    void add(const string& s) { root = insertNode(root, s); }
+    void displayLogs() const { inorder(root); }
+    void save(ofstream& out) const { inorder(root, &out); }
+};
+
+// ==========================================
+// SIMPLE GRAPH (ADJ-LIST)
+// ==========================================
+struct AdjListNode {
+    int dest;
+    int weight;
+    AdjListNode* next;
+    AdjListNode(int d, int w) : dest(d), weight(w), next(nullptr) {}
+};
+
+struct NodeInfo { string name; int x; int y; char type; };
+
+class Graph {
+public:
+    static const int MAX_NODES = 20;
+    NodeInfo nodes[MAX_NODES];
+    AdjListNode* adjList[MAX_NODES];
+    int nodeCount;
+
+    Graph() : nodeCount(0) { for (int i = 0; i < MAX_NODES; ++i) adjList[i] = nullptr; }
+
+    void addNode(const string& name, int x, int y, char type) {
+        nodes[nodeCount] = { name, x, y, type };
+        nodeCount++;
+    }
+
+    void addEdge(int src, int dest, int weight) {
+        AdjListNode* newNode = new AdjListNode(dest, weight);
+        newNode->next = adjList[src];
+        adjList[src] = newNode;
+    }
+
+    // DIJKSTRA
+    void dijkstra(int startNode, int endNode) const {
+        int dist[MAX_NODES]; bool visited[MAX_NODES]; int parent[MAX_NODES];
+        for (int i = 0; i < MAX_NODES; ++i) { dist[i] = INT_MAX; visited[i] = false; parent[i] = -1; }
+        dist[startNode] = 0;
+        for (int count = 0; count < nodeCount - 1; ++count) {
+            int u = -1; int minDist = INT_MAX;
+            for (int i = 0; i < nodeCount; ++i) if (!visited[i] && dist[i] <= minDist) { minDist = dist[i]; u = i; }
+            if (u == -1) break;
+            visited[u] = true;
+            AdjListNode* cur = adjList[u];
+            while (cur) {
+                int v = cur->dest;
+                if (!visited[v] && dist[u] != INT_MAX && dist[u] + cur->weight < dist[v]) {
+                    dist[v] = dist[u] + cur->weight;
+                    parent[v] = u;
+                }
+                cur = cur->next;
+            }
+        }
+        if (dist[endNode] == INT_MAX) cout << "No safe path found!" << endl;
+        else {
+            cout << "OPTIMAL ROUTE (Distance: " << dist[endNode] << "km): ";
+            printPath(parent, endNode);
+            cout << endl;
+        }
+    }
+
+    void printPath(int parent[], int j) const {
+        if (parent[j] == -1) { cout << nodes[j].name; return; }
+        printPath(parent, parent[j]);
+        cout << " -> " << nodes[j].name;
+    }
+};
+
+#endif
+
+
+// === File: main.cpp ===
+#define NOMINMAX
+#define _CRT_SECURE_NO_WARNINGS
+#include <iostream>
+#include <windows.h>
+#include <string>
+#include <ctime>
+#include "DataStructures.h"
+
+using namespace std;
+
+// --- Global Systems ---
+Graph airspace;
+HashTable registry;
+MinHeap landingQueue;
+AVLTree flightLog;
+
+// Load saved flights (if any)
+void loadSavedFlights() {
+    ifstream inFile("flight_data.txt");
+    if (!inFile) return;
+    string id, model;
+    int fuel, prio, x, y, nodeId;
+    while (inFile >> id >> model >> fuel >> prio >> x >> y >> nodeId) {
+        Plane p(id, model, fuel, prio, x, y, nodeId);
+        p.status = "In Air";
+        registry.insert(p);
+        Plane* stored = registry.search(id);
+        if (stored) landingQueue.insert(stored);
+    }
+    inFile.close();
+    cout << "Previous Data Loaded Successfully." << endl;
+}
+
+void setupEnvironment() {
+    // Popular city names
+    airspace.addNode("LHR (Lahore)", 18, 5, 'A');
+    airspace.addNode("ISB (Islamabad)", 2, 2, 'A');
+    airspace.addNode("KHI (Karachi)", 5, 18, 'A');
+    airspace.addNode("Waypoint Alpha", 10, 5, 'W');
+    airspace.addNode("Waypoint Bravo", 10, 10, 'W');
+    airspace.addNode("Waypoint Charlie", 5, 10, 'W');
+
+    airspace.addEdge(1, 3, 50);
+    airspace.addEdge(3, 0, 40);
+    airspace.addEdge(1, 5, 60);
+    airspace.addEdge(5, 4, 30);
+    airspace.addEdge(4, 2, 80);
+    airspace.addEdge(2, 4, 80);
+    airspace.addEdge(4, 0, 50);
+    airspace.addEdge(0, 4, 50);
+
+    loadSavedFlights();
+}
+
+void displayRadar() {
+    system("cls");
+    char grid[20][20];
+    for (int i = 0; i < 20; ++i) for (int j = 0; j < 20; ++j) grid[i][j] = '.';
+    for (int i = 0; i < airspace.nodeCount; ++i) {
+        int gx = airspace.nodes[i].x;
+        int gy = airspace.nodes[i].y;
+        if (gx < 20 && gy < 20) grid[gy][gx] = airspace.nodes[i].type;
+    }
+    Plane* arr[400]; int cnt = 0; registry.collectAll(arr, cnt);
+    for (int i = 0; i < cnt; ++i) {
+        if (arr[i]->status != "Landed") {
+            int px = arr[i]->x; int py = arr[i]->y;
+            if (px < 20 && py < 20) grid[py][px] = 'P';
+        }
+    }
+
+    cout << "=================== AERONET RADAR (20x20) ===================" << endl;
+    for (int i = 0; i < 20; ++i) {
+        cout << " ";
+        for (int j = 0; j < 20; ++j) {
+            if (grid[i][j] == 'A') cout << "[A]";
+            else if (grid[i][j] == 'W') cout << " + ";
+            else if (grid[i][j] == 'P') cout << "<P>";
+            else cout << " . ";
+        }
+        cout << endl;
+    }
+    cout << "============================================================" << endl;
+    cout << "NEXT LANDING: ";
+    Plane* next = landingQueue.peek();
+    if (next) cout << next->id << " (Priority: " << next->priority << ") - " << next->status << endl;
+    else cout << "Runway Clear." << endl;
+}
+
+// --- Menus ---
+void addFlightMenu() {
+    string id, model;
+    int srcNode, fuel;
+    cout << "Enter Flight ID (e.g., PK-786): "; cin >> id;
+    cout << "Enter Model (e.g., A320): "; cin >> model;
+    cout << "Enter Fuel %: "; cin >> fuel;
+    cout << "Select Origin (0:LHR, 1:ISB, 2:KHI): "; cin >> srcNode;
+
+    if (srcNode < 0 || srcNode >= airspace.nodeCount) srcNode = 0;
+    int pr = (fuel < 10) ? 2 : 3;
+    int px = airspace.nodes[srcNode].x; int py = airspace.nodes[srcNode].y;
+    Plane p(id, model, fuel, pr, px, py, srcNode);
+    registry.insert(p);
+    Plane* stored = registry.search(id);
+    if (stored) landingQueue.insert(stored);
+    cout << "Flight Added Successfully!" << endl;
+    system("pause");
+}
+
+void emergencyMenu() {
+    string id; cout << "Enter Flight ID to mark emergency: "; cin >> id;
+    Plane* p = registry.search(id);
+    if (p) {
+        cout << "Select Emergency Type:" << endl;
+        cout << "1. Medical" << endl;
+        cout << "2. Engine Failure" << endl;
+        cout << "3. Security Threat" << endl;
+        int t; cin >> t;
+        p->priority = 1;
+        p->status = "CRITICAL EMERGENCY";
+        landingQueue.decreaseKey(p->id, 1);
+        cout << "PRIORITY UPDATED TO CRITICAL (1)" << endl;
+    } else cout << "Flight not found!" << endl;
+    system("pause");
+}
+
+void landFlight() {
+    if (landingQueue.empty()) { cout << "No flights waiting to land." << endl; system("pause"); return; }
+    Plane* p = landingQueue.extractMin();
+    p->status = "Landed";
+    time_t now = time(0);
+    string dt = ctime(&now); if (!dt.empty()) dt.pop_back();
+    string log = "[" + dt + "] Flight " + p->id + " Landed. Fuel: " + to_string(p->fuel) + "%";
+    flightLog.add(log);
+    cout << ">>> LANDED SUCCESSFULLY: " << p->id << " <<<" << endl;
+    system("pause");
+}
+
+void searchFlight() {
+    string id; cout << "Enter Flight ID: "; cin >> id;
+    Plane* p = registry.search(id);
+    if (p) {
+        cout << "
+--- FLIGHT DETAILS ---" << endl;
+        cout << "ID: " << p->id << endl;
+        cout << "Model: " << p->model << endl;
+        cout << "Location: (" << p->x << ", " << p->y << ")" << endl;
+        cout << "Fuel: " << p->fuel << "%" << endl;
+        cout << "Priority: " << p->priority << endl;
+        cout << "Status: " << p->status << endl;
+        cout << "
+[System] Calculating Emergency Path to KHI..." << endl;
+        airspace.dijkstra(p->nodeId, 2);
+    } else cout << "Flight not found." << endl;
+    system("pause");
+}
+
+void saveData() {
+    ofstream out("flight_data.txt");
+    registry.dumpToFile(out);
+    out.close();
+    ofstream logs("flight_logs.txt");
+    flightLog.save(logs);
+    logs.close();
+    cout << "Data saved to .txt files." << endl;
+    system("pause");
+}
+
+int main() {
+    setupEnvironment();
+    while (true) {
+        displayRadar();
+        cout << "
+--- AERONET ATC MAIN MENU ---" << endl;
+        cout << "1. Add New Flight" << endl;
+        cout << "2. Declare Emergency" << endl;
+        cout << "3. Land Next Priority Flight" << endl;
+        cout << "4. Search Flight Details" << endl;
+        cout << "5. View Daily Flight Logs" << endl;
+        cout << "6. Save & Exit" << endl;
+        cout << "Choice: ";
+        int ch; cin >> ch;
+        switch (ch) {
+        case 1: addFlightMenu(); break;
+        case 2: emergencyMenu(); break;
+        case 3: landFlight(); break;
+        case 4: searchFlight(); break;
+        case 5:
+            cout << "
+--- DAILY FLIGHT LOGS ---" << endl;
+            flightLog.displayLogs();
+            system("pause");
+            break;
+        case 6: saveData(); return 0;
+        default: break;
+        }
+    }
+    return 0;
+}
